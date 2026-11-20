@@ -1,0 +1,61 @@
+
+services:
+
+  # Redis database
+  redis:
+    image: redis:7-alpine
+    container_name: hotel-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Temporal workflow server
+  temporal:
+    image: temporalio/temporal:latest
+    container_name: temporal-server
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    command: server start-dev --ip 0.0.0.0
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  # Express application
+  app:
+    build: .
+    container_name: hotel-app
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      SUPPLIER_BASE_URL: http://app:3000
+    depends_on:
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Temporal worker
+  worker:
+    build: .
+    container_name: hotel-worker
+    command: ["node", "dist/worker.js"]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: unless-stopped
